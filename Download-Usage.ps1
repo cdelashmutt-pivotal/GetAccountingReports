@@ -1,5 +1,5 @@
 # List of Environments keyed by name, and the value is the system domain
-$targets = Get-Content .\environments.txt | ConvertFrom-StringData
+$targets = ConvertFrom-StringData ([io.file]::ReadAllText("environments.txt"))
 
 #Ensure TLS 1.2
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -30,6 +30,32 @@ function Export-PlatformUsage ([string]$SysDomain, [string]$Type, [string]$Path)
 }
 
 $creds = Get-Credential -Message "Enter your FEAD Shortname and Password"
+if(!$creds){ exit }
+
+$OrgScript = {
+    Param (
+        $org,
+        [string]$system_domain,
+        [string]$token,
+        [string]$environment,
+        [string]$path
+    )
+    $startDate = ([DateTime]$org.metadata.created_at).ToString("yyyy-MM-dd")
+    $endDate = [DateTime]::Now.ToString("yyyy-MM-dd")
+    # Org App Usage
+    [System.Collections.ArrayList]$org_app_usages = @()
+    $orgAppReport = Invoke-RestMethod "https://app-usage.$system_domain/organizations/$($org.metadata.guid)/app_usages?start=$startDate&end=$endDate" -Headers @{Authorization="$token"}
+    foreach($orgAppUsage in $orgAppReport.app_usages) {
+        $orgAppUsage | Add-Member -Name "organization_name" -Value $org.entity.name -MemberType NoteProperty 
+        $orgAppUsage | Add-Member -Name "organization_guid" -Value $orgAppReport.organization_guid -MemberType NoteProperty 
+        $orgAppUsage | Add-Member -Name "period_start" -Value $orgAppReport.period_start -MemberType NoteProperty 
+        $orgAppUsage | Add-Member -Name "period_end" -Value $orgAppReport.period_end -MemberType NoteProperty 
+        [void]$org_app_usages.Add($orgAppUsage)
+    }
+    if($org_app_usages.Count -gt 0) {
+        $org_app_usages | Export-Csv -NoTypeInformation -Path $(Join-Path $path "$environment-$($org.entity.name)-app-usage.csv")
+    }
+}
 
 foreach($key in $targets.Keys) 
 {
@@ -65,54 +91,35 @@ foreach($key in $targets.Keys)
 
             if($?) {
                 $token = "$(cf oauth-token)"
-                foreach($org in $orgs.resources) {
-                    $running = @(Get-Job | Where-Object { $_.State -eq 'Running' })
-                    if ($running.Count -le 16) {
-                        Start-Job {
-                            add-type @"
-                                using System.Net;
-                                using System.Security.Cryptography.X509Certificates;
-                                public class TrustAllCertsPolicy : ICertificatePolicy {
-                                    public bool CheckValidationResult(
-                                        ServicePoint srvPoint, X509Certificate certificate,
-                                        WebRequest request, int certificateProblem) {
-                                        return true;
-                                    }
-                                }
-"@
-                            [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
+                $jobs = @()
+                $sessionState = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+                $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, 16, $sessionState, $Host)
+                $runspacePool.Open()
 
-                            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-                            $startDate = ([DateTime]$Using:org.metadata.created_at).ToString("yyyy-MM-dd")
-                            $endDate = [DateTime]::Now.ToString("yyyy-MM-dd")
-                            if($Using:org.entity.name -ne "system") {
-                                # Org App Usage
-                                [System.Collections.ArrayList]$org_app_usages = @()
-                                $orgAppReport = Invoke-RestMethod "https://app-usage.$Using:system_domain/organizations/$($Using:org.metadata.guid)/app_usages?start=$startDate&end=$endDate" -Headers @{Authorization="$Using:token"}
-                                foreach($orgAppUsage in $orgAppReport.app_usages) {
-                                    $orgAppUsage | Add-Member -Name "organization_name" -Value $Using:org.entity.name -MemberType NoteProperty 
-                                    $orgAppUsage | Add-Member -Name "organization_guid" -Value $orgAppReport.organization_guid -MemberType NoteProperty 
-                                    $orgAppUsage | Add-Member -Name "period_start" -Value $orgAppReport.period_start -MemberType NoteProperty 
-                                    $orgAppUsage | Add-Member -Name "period_end" -Value $orgAppReport.period_end -MemberType NoteProperty 
-                                    [void]$org_app_usages.Add($orgAppUsage)
-                                }
-                                if($org_app_usages.Count -gt 0) {
-                                    $org_app_usages | Export-Csv -NoTypeInformation -Path $(Join-Path $Using:PSScriptRoot "$Using:key-$($Using:org.entity.name)-app-usage.csv")
-                                }
-                            }
+                foreach($org in $orgs.resources) {
+                    if($org.entity.name -ne "system") {
+                        $job = [powershell]::Create().AddScript($OrgScript)
+                        [void]$job.AddParameter("org", $org)
+                        [void]$job.AddParameter("system_domain", $system_domain)
+                        [void]$job.AddParameter("token", $token)
+                        [void]$job.AddParameter("environment", $key)
+                        [void]$job.AddParameter("path", $PSScriptRoot)
+                        $job.RunspacePool = $runspacePool
+                        $jobs += New-Object PSObject -Property @{
+                            Job = $job
+                            Result = $job.BeginInvoke()
                         }
-                    } else {
-                        $running | Wait-Job
                     }
                 }
+
+                Write-Host "Waiting for jobs to complete" -NoNewline
+                while( $jobs.Result.IsCompleted -contains $false )
+                {
+                    Write-Host "." -NoNewline
+                    Start-Sleep -Seconds 2
+                }
+                Write-Host "Done!"
             }
         }
     }
-}
-
-Write-Host "Waiting for jobs to complete" -NoNewline
-while( @(Get-Job | Where-Object { $_.State -eq 'Running' }).Count -gt 0 )
-{
-    Write-Host "." -NoNewline
-    Sleep 2
 }
