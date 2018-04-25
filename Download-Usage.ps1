@@ -19,13 +19,18 @@ add-type @"
 [System.Net.ServicePointManager]::CertificatePolicy = New-Object TrustAllCertsPolicy
 
 
-function Export-PlatformUsage ([string]$SysDomain, [string]$Type, [string]$Path) {
+function Export-PlatformUsage ([string]$SysDomain, [string]$Type, [string]$Path, [string]$Platform) {
     $platformReport = Invoke-RestMethod "https://app-usage.$SysDomain/system_report/$Type" -Headers @{Authorization="$(cf oauth-token)"}
     if($?) {
         for($i=0; $i -lt $platformReport.monthly_reports.Length; $i++) { 
             $platformReport.monthly_reports[$i] | Add-Member -Name "report_time" -Value $platformReport.report_time -MemberType NoteProperty
+            $platformReport.monthly_reports[$i] | Add-Member -Name "platform" -Value $Platform -MemberType NoteProperty
         }
-        $platformReport.monthly_reports | Export-CSV -NoTypeInformation -Path "$Path"
+        if(Test-Path $Path -PathType Leaf) {
+            $platformReport.monthly_reports | Export-CSV -NoTypeInformation -Path "$Path" -Append
+        } else {
+            $platformReport.monthly_reports | Export-CSV -NoTypeInformation -Path "$Path"
+        }
     }
 }
 
@@ -34,6 +39,7 @@ if(!$creds){ exit }
 
 $OrgScript = {
     Param (
+        [string]$platform,
         $org,
         [string]$system_domain,
         [string]$token,
@@ -50,10 +56,16 @@ $OrgScript = {
         $orgAppUsage | Add-Member -Name "organization_guid" -Value $orgAppReport.organization_guid -MemberType NoteProperty 
         $orgAppUsage | Add-Member -Name "period_start" -Value $orgAppReport.period_start -MemberType NoteProperty 
         $orgAppUsage | Add-Member -Name "period_end" -Value $orgAppReport.period_end -MemberType NoteProperty 
+        $orgAppUsage | Add-Member -Name "platform" -Value $platform -MemberType NoteProperty 
         [void]$org_app_usages.Add($orgAppUsage)
     }
     if($org_app_usages.Count -gt 0) {
-        $org_app_usages | Export-Csv -NoTypeInformation -Path $(Join-Path $path "$environment-$($org.entity.name)-app-usage.csv")
+        $orgAppUsagePath = Join-Path $path "org-app-usage.csv"
+        if(Test-Path $orgAppUsagePath -PathType Leaf) {
+            $org_app_usages | Export-Csv -NoTypeInformation -Path $orgAppUsagePath -Append
+        } else {
+            $org_app_usages | Export-Csv -NoTypeInformation -Path $orgAppUsagePath
+        }
     }
 
     # Org Task Usage
@@ -68,12 +80,18 @@ $OrgScript = {
                 $task_summary | Add-Member -Name "period_end" -Value $orgTaskReport.period_end -MemberType NoteProperty
                 $task_summary | Add-Member -Name "space_name" -Value $space_summary.Value.space_name -MemberType NoteProperty
                 $task_summary | Add-Member -Name "space_guid" -Value $space_summary.Name -MemberType NoteProperty
+                $task_summary | Add-Member -Name "platform" -Value $platform -MemberType NoteProperty
                 [void]$org_task_usages.Add($task_summary)
             }
         }
     }
     if($org_task_usages.Count -gt 0) {
-        $org_task_usages | Export-Csv -NoTypeInformation -Path $(Join-Path $path "$environment-$($org.entity.name)-task-usage.csv")
+        $orgTaskUsagePath = Join-Path $path "org-task-usage.csv"
+        if(Test-Path $orgTaskUsagePath -PathType Leaf ) {
+            $org_task_usages | Export-Csv -NoTypeInformation -Path $orgTaskUsagePath -Append
+        } else {
+            $org_task_usages | Export-Csv -NoTypeInformation -Path $orgTaskUsagePath
+        }
     }
 
     # Org Service Usage
@@ -84,10 +102,16 @@ $OrgScript = {
         $service_usage | Add-Member -Name "organization_guid" -Value $orgServiceReport.organization_guid -MemberType NoteProperty 
         $service_usage | Add-Member -Name "period_start" -Value $orgServiceReport.period_start -MemberType NoteProperty 
         $service_usage | Add-Member -Name "period_end" -Value $orgServiceReport.period_end -MemberType NoteProperty
+        $service_usage | Add-Member -Name "platform" -Value $platform -MemberType NoteProperty
         [void]$org_service_usages.Add($service_usage)
     }
     if($org_service_usages.Count -gt 0) {
-        $org_service_usages | Export-Csv -NoTypeInformation -Path $(Join-Path $path "$environment-$($org.entity.name)-service-usage.csv")
+        $orgServiceUsagePath = Join-Path $path "org-service-usage.csv"
+        if(Test-Path $orgServiceUsagePath -PathType Leaf) {
+            $org_service_usages | Export-Csv -NoTypeInformation -Path $orgServiceUsagePath -Append
+        } else {
+            $org_service_usages | Export-Csv -NoTypeInformation -Path $orgServiceUsagePath
+        }
     }
 }
 
@@ -101,10 +125,10 @@ foreach($key in $targets.Keys)
     {
         $system_domain = $targets[$key]
         # Platform App Usage
-        Export-PlatformUsage -SysDomain $system_domain -Type "app_usages" -Path "$($key)-platform-app-usage.csv"
+        Export-PlatformUsage -SysDomain $system_domain -Type "app_usages" -Path "summary-app-usage.csv" -Platform $key
 
         # Platform Task Usage
-        Export-PlatformUsage -SysDomain $system_domain -Type "task_usages" -Path "$($key)-platform-task-usage.csv"
+        Export-PlatformUsage -SysDomain $system_domain -Type "task_usages" -Path "summary-task-usage.csv" -Platform $key
 
         # Platform Service Usage
         $platformServiceReport = Invoke-RestMethod "https://app-usage.$system_domain/system_report/service_usages" -Headers @{Authorization="$(cf oauth-token)"}
@@ -115,10 +139,16 @@ foreach($key in $targets.Keys)
                     $usage | Add-Member -Name "report_time" -Value $platformServiceReport.report_time -MemberType NoteProperty 
                     $usage | Add-Member -Name "service_name" -Value $monthly_service_report.service_name -MemberType NoteProperty 
                     $usage | Add-Member -Name "service_guid" -Value $monthly_service_report.service_guid -MemberType NoteProperty
+                    $usage | Add-Member -Name "platform" -Value $key -MemberType NoteProperty
                     [void]$service_usages.Add( $usage )
                 }
             }
-            $service_usages | Export-CSV -NoTypeInformation -Path "$($key)-platform-service-usage.csv"
+            $serviceSummaryPath = "summary-service-usage.csv"
+            if(Test-Path $serviceSummaryPath -PathType Leaf) {
+                $service_usages | Export-CSV -NoTypeInformation -Path $serviceSummaryPath -Append
+            } else {
+                $service_usages | Export-CSV -NoTypeInformation -Path $serviceSummaryPath 
+            }
 
             # All the Orgs we can see
             $orgs = & cf curl "/v2/organizations" | ConvertFrom-Json
@@ -133,6 +163,7 @@ foreach($key in $targets.Keys)
                 foreach($org in $orgs.resources) {
                     if($org.entity.name -ne "system") {
                         $job = [powershell]::Create().AddScript($OrgScript)
+                        [void]$job.AddParameter("platform", $key)
                         [void]$job.AddParameter("org", $org)
                         [void]$job.AddParameter("system_domain", $system_domain)
                         [void]$job.AddParameter("token", $token)
