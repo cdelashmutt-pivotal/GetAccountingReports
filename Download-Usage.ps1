@@ -55,6 +55,40 @@ $OrgScript = {
     if($org_app_usages.Count -gt 0) {
         $org_app_usages | Export-Csv -NoTypeInformation -Path $(Join-Path $path "$environment-$($org.entity.name)-app-usage.csv")
     }
+
+    # Org Task Usage
+    [System.Collections.ArrayList]$org_task_usages = @()
+    $orgTaskReport = Invoke-RestMethod "https://app-usage.$system_domain/organizations/$($org.metadata.guid)/task_usages?start=$startDate&end=$endDate" -Headers @{Authorization="$token"}
+    foreach($space in $orgTaskReport.spaces) {
+        foreach($space_summary in $space.PSObject.Properties) {
+            foreach($task_summary in $space_summary.Value.task_summaries) {
+                $task_summary | Add-Member -Name "organization_name" -Value $org.entity.name -MemberType NoteProperty 
+                $task_summary | Add-Member -Name "organization_guid" -Value $orgTaskReport.organization_guid -MemberType NoteProperty 
+                $task_summary | Add-Member -Name "period_start" -Value $orgTaskReport.period_start -MemberType NoteProperty 
+                $task_summary | Add-Member -Name "period_end" -Value $orgTaskReport.period_end -MemberType NoteProperty
+                $task_summary | Add-Member -Name "space_name" -Value $space_summary.Value.space_name -MemberType NoteProperty
+                $task_summary | Add-Member -Name "space_guid" -Value $space_summary.Name -MemberType NoteProperty
+                [void]$org_task_usages.Add($task_summary)
+            }
+        }
+    }
+    if($org_task_usages.Count -gt 0) {
+        $org_task_usages | Export-Csv -NoTypeInformation -Path $(Join-Path $path "$environment-$($org.entity.name)-task-usage.csv")
+    }
+
+    # Org Service Usage
+    [System.Collections.ArrayList]$org_service_usages = @()
+    $orgServiceReport = Invoke-RestMethod "https://app-usage.$system_domain/organizations/$($org.metadata.guid)/service_usages?start=$startDate&end=$endDate" -Headers @{Authorization="$token"}
+    foreach($service_usage in $orgServiceReport.service_usages) {
+        $service_usage | Add-Member -Name "organization_name" -Value $org.entity.name -MemberType NoteProperty 
+        $service_usage | Add-Member -Name "organization_guid" -Value $orgServiceReport.organization_guid -MemberType NoteProperty 
+        $service_usage | Add-Member -Name "period_start" -Value $orgServiceReport.period_start -MemberType NoteProperty 
+        $service_usage | Add-Member -Name "period_end" -Value $orgServiceReport.period_end -MemberType NoteProperty
+        [void]$org_service_usages.Add($service_usage)
+    }
+    if($org_service_usages.Count -gt 0) {
+        $org_service_usages | Export-Csv -NoTypeInformation -Path $(Join-Path $path "$environment-$($org.entity.name)-service-usage.csv")
+    }
 }
 
 foreach($key in $targets.Keys) 
