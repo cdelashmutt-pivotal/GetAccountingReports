@@ -1,0 +1,4 @@
+# Copy this file to "environments.txt" and replace the example environments in this file with the ones you want to report on
+# Format is "Environment Name" = "system domain"
+Foo = sys.foo.domain
+Bar = sys.bar.domain
