@@ -8,9 +8,17 @@ The script produces up to 6 files:
 * __summary-app-usage.csv__ - The summarized Application Usage data for all the foundations reported against.
 * __summary-task-usage.csv__ - The summarized Task Usage data for all the foundations reported against.
 * __summary-service-usage.csv__ - The summarized Service Usage data for all the foundations reported against.
-* __org-app-usage.csv__ - Application Usage data broken out by organization, space, and application for all foundations reported against.
-* __org-task-usage.csv__ - Task Usage data broken out by organization, space, and parent application for all foundations reported against.
-* __org-service-usage.csv__ - Service Usage data broken out by organization, space, and service instance for all foundations reported against.
+* __org-app-usage.csv__ - Application Usage data broken out by month, organization, space, and application for all foundations reported against.
+* __org-task-usage.csv__ - Task Usage data broken out by month, organization, space, and parent application for all foundations reported against.
+* __org-service-usage.csv__ - Service Usage data broken out by month, organization, space, and service instance for all foundations reported against.
+
+**Note**
+
+---
+
+This script will simply append to any existing files in the same directory with the names above.  This means running the script twice in a row without removing the output CSVs from the first run will result in duplicate data.
+
+---
 
 ## Usage
 1. Clone or Download this repo
