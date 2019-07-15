@@ -1,5 +1,6 @@
 # List of Environments keyed by name, and the value is the system domain
-$targets = ConvertFrom-StringData ([io.file]::ReadAllText("environments.txt"))
+$targetPath = Join-Path $PSScriptRoot "environments.txt"
+$targets = ConvertFrom-StringData ([io.file]::ReadAllText($targetPath))
 
 #Ensure TLS 1.2
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
