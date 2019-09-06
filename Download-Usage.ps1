@@ -26,14 +26,19 @@ $syncOrgServiceUsage = "service"
 function Export-PlatformUsage ([string]$SysDomain, [string]$Type, [string]$Path, [string]$Platform) {
     $platformReport = Invoke-RestMethod "https://app-usage.$SysDomain/system_report/$Type" -Headers @{Authorization="$(cf oauth-token)"}
     if($?) {
-        for($i=0; $i -lt $platformReport.monthly_reports.Length; $i++) { 
-            $platformReport.monthly_reports[$i] | Add-Member -Name "report_time" -Value $platformReport.report_time -MemberType NoteProperty
-            $platformReport.monthly_reports[$i] | Add-Member -Name "platform" -Value $Platform -MemberType NoteProperty
-        }
+        $reportOutput = (
+            $platformReport.monthly_reports | select-object @{Name="month"; Expression={$_.month}},
+                @{Name="year"; Expression={$_.year}},
+                @{Name="average_app_instances"; Expression={$_.average_app_instances}},
+                @{Name="maximum_app_instances"; Expression={$_.maximum_app_instances}},
+                @{Name="app_instance_hours"; Expression={$_.app_instance_hours}},
+                @{Name="report_time"; Expression={$platformReport.report_time}},
+                @{Name="platform"; Expression={$Platform}}
+            )
         if(Test-Path $Path -PathType Leaf) {
-            $platformReport.monthly_reports | Export-CSV -NoTypeInformation -Path "$Path" -Append
+            $reportOutput | Export-CSV -NoTypeInformation -Path "$Path" -Append
         } else {
-            $platformReport.monthly_reports | Export-CSV -NoTypeInformation -Path "$Path"
+            $reportOutput | Export-CSV -NoTypeInformation -Path "$Path"
         }
     }
 }
@@ -71,16 +76,20 @@ $OrgScript = {
         $endDate = $endDateTime.ToString("yyyy-MM-dd")
 
         # Org App Usage
-        [System.Collections.ArrayList]$org_app_usages = @()
         $orgAppReport = Invoke-RestMethod "https://app-usage.$system_domain/organizations/$($org.metadata.guid)/app_usages?start=$startDate&end=$endDate" -Headers @{Authorization="$token"}
-        foreach($orgAppUsage in $orgAppReport.app_usages) {
-            $orgAppUsage | Add-Member -Name "organization_name" -Value $org.entity.name -MemberType NoteProperty 
-            $orgAppUsage | Add-Member -Name "organization_guid" -Value $orgAppReport.organization_guid -MemberType NoteProperty 
-            $orgAppUsage | Add-Member -Name "period_start" -Value $orgAppReport.period_start -MemberType NoteProperty 
-            $orgAppUsage | Add-Member -Name "period_end" -Value $orgAppReport.period_end -MemberType NoteProperty 
-            $orgAppUsage | Add-Member -Name "platform" -Value $platform -MemberType NoteProperty 
-            [void]$org_app_usages.Add($orgAppUsage)
-        }
+        $org_app_usages = (
+            $orgAppReport.app_usages | select-object @{Name="space_name"; Expression={$_.space_name}},
+                @{Name="app_name"; Expression={$_.app_name}},
+                @{Name="app_guid"; Expression={$_.app_guid}},
+                @{Name="instance_count"; Expression={$_.instance_count}},
+                @{Name="memory_in_mb_per_instance"; Expression={$_.memory_in_mb_per_instance}},
+                @{Name="duration_in_seconds"; Expression={$_.duration_in_seconds}},
+                @{Name="organization_name"; Expression={$org.entity.name}},
+                @{Name="organization_guid"; Expression={$orgAppReport.organization_guid}},
+                @{Name="period_start"; Expression={$orgAppReport.period_start}},
+                @{Name="period_end"; Expression={$orgAppReport.period_end}},
+                @{Name="platform"; Expression={$platform}}
+        )
         if($org_app_usages.Count -gt 0) {
             $orgAppUsagePath = Join-Path $path "org-app-usage.csv"
             [bool]$lockTaken = $false
@@ -104,14 +113,20 @@ $OrgScript = {
         foreach($space in $orgTaskReport.spaces) {
             foreach($space_summary in $space.PSObject.Properties) {
                 foreach($task_summary in $space_summary.Value.task_summaries) {
-                    $task_summary | Add-Member -Name "organization_name" -Value $org.entity.name -MemberType NoteProperty 
-                    $task_summary | Add-Member -Name "organization_guid" -Value $orgTaskReport.organization_guid -MemberType NoteProperty 
-                    $task_summary | Add-Member -Name "period_start" -Value $orgTaskReport.period_start -MemberType NoteProperty 
-                    $task_summary | Add-Member -Name "period_end" -Value $orgTaskReport.period_end -MemberType NoteProperty
-                    $task_summary | Add-Member -Name "space_name" -Value $space_summary.Value.space_name -MemberType NoteProperty
-                    $task_summary | Add-Member -Name "space_guid" -Value $space_summary.Name -MemberType NoteProperty
-                    $task_summary | Add-Member -Name "platform" -Value $platform -MemberType NoteProperty
-                    [void]$org_task_usages.Add($task_summary)
+                    $org_task_usages += ($task_summary | select-object @{Name="parent_application_guid"; Expression={$_.parent_application_guid}},
+                        @{Name="parent_application_name"; Expression={$_.parent_application_name}},
+                        @{Name="memory_in_mb_per_instance"; Expression={$_.memory_in_mb_per_instance}},
+                        @{Name="task_count_for_range"; Expression={$_.task_count_for_range}},
+                        @{Name="total_duration_in_seconds_for_range"; Expression={$_.total_duration_in_seconds_for_range}},
+                        @{Name="max_concurrent_task_count_for_parent_app"; Expression={$_.max_concurrent_task_count_for_parent_app}},
+                        @{Name="organization_name"; Expression={$org.entity.name}},
+                        @{Name="organization_guid"; Expression={$orgTaskReport.organization_guid}},
+                        @{Name="period_start"; Expression={$orgTaskReport.period_start}},
+                        @{Name="period_end"; Expression={$orgTaskReport.period_end}},
+                        @{Name="space_name"; Expression={$space_summary.Value.space_name}},
+                        @{Name="space_guid"; Expression={$space_summary.Name}},
+                        @{Name="platform"; Expression={$platform}}
+                    )
                 }
             }
         }
@@ -133,16 +148,26 @@ $OrgScript = {
         }
 
         # Org Service Usage
-        [System.Collections.ArrayList]$org_service_usages = @()
         $orgServiceReport = Invoke-RestMethod "https://app-usage.$system_domain/organizations/$($org.metadata.guid)/service_usages?start=$startDate&end=$endDate" -Headers @{Authorization="$token"}
-        foreach($service_usage in $orgServiceReport.service_usages) {
-            $service_usage | Add-Member -Name "organization_name" -Value $org.entity.name -MemberType NoteProperty 
-            $service_usage | Add-Member -Name "organization_guid" -Value $orgServiceReport.organization_guid -MemberType NoteProperty 
-            $service_usage | Add-Member -Name "period_start" -Value $orgServiceReport.period_start -MemberType NoteProperty 
-            $service_usage | Add-Member -Name "period_end" -Value $orgServiceReport.period_end -MemberType NoteProperty
-            $service_usage | Add-Member -Name "platform" -Value $platform -MemberType NoteProperty
-            [void]$org_service_usages.Add($service_usage)
-        }
+        $org_service_usages = ($orgServiceReport.service_usages | select-object @{Name="deleted"; Expression={$_.deleted}},
+            @{Name="duration_in_seconds"; Expression={$_.duration_in_seconds}},
+            @{Name="space_guid"; Expression={$_.space_guid}},
+            @{Name="space_name"; Expression={$_.space_name}},
+            @{Name="service_instance_guid"; Expression={$_.service_instance_guid}},
+            @{Name="service_instance_name"; Expression={$_.service_instance_name}},
+            @{Name="service_instance_type"; Expression={$_.service_instance_type}},
+            @{Name="service_plan_guid"; Expression={$_.service_plan_guid}},
+            @{Name="service_plan_name"; Expression={$_.service_plan_name}},
+            @{Name="service_name"; Expression={$_.service_name}},
+            @{Name="service_guid"; Expression={$_.service_guid}},
+            @{Name="service_instance_creation"; Expression={$_.service_instance_creation}},
+            @{Name="service_instance_deletion"; Expression={$_.service_instance_deletion}},
+            @{Name="organization_name"; Expression={$org.entity.name}},
+            @{Name="organization_guid"; Expression={$orgServiceReport.organization_guid}},
+            @{Name="period_start"; Expression={$orgServiceReport.period_start}},
+            @{Name="period_end"; Expression={$orgServiceReport.period_end}},
+            @{Name="platform"; Expression={$platform}}
+        )
         if($org_service_usages.Count -gt 0) {
             $orgServiceUsagePath = Join-Path $path "org-service-usage.csv"
             [bool]$lockTaken = $false
@@ -185,12 +210,17 @@ foreach($key in $targets.Keys)
         if($?) {
             [System.Collections.ArrayList]$service_usages = @()
             foreach($monthly_service_report in $platformServiceReport.monthly_service_reports) {
-                foreach($usage in $monthly_service_report.usages) {
-                    $usage | Add-Member -Name "report_time" -Value $platformServiceReport.report_time -MemberType NoteProperty 
-                    $usage | Add-Member -Name "service_name" -Value $monthly_service_report.service_name -MemberType NoteProperty 
-                    $usage | Add-Member -Name "service_guid" -Value $monthly_service_report.service_guid -MemberType NoteProperty
-                    $usage | Add-Member -Name "platform" -Value $key -MemberType NoteProperty
-                    [void]$service_usages.Add( $usage )
+                foreach($usage_data in $monthly_service_report.usages) {
+                    $service_usages += ($usage_data | select-object @{Name="month"; Expression={$_.month}},
+                        @{Name="year"; Expression={$_.year}},
+                        @{Name="duration_in_hours"; Expression={$_.duration_in_hours}},
+                        @{Name="average_instances"; Expression={$_.average_instances}},
+                        @{Name="maximum_instances"; Expression={$_.maximum_instances}},
+                        @{Name="report_time"; Expression={$platformServiceReport.report_time}},
+                        @{Name="service_name"; Expression={$monthly_service_report.service_name}},
+                        @{Name="service_guid"; Expression={$monthly_service_report.service_guid}},
+                        @{Name="platform"; Expression={$key}}
+                    )
                 }
             }
             $serviceSummaryPath = "summary-service-usage.csv"
